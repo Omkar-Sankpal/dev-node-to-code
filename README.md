@@ -1,5 +1,20 @@
 # React + TypeScript + Vite
 
+## Local model management
+
+The Electron application includes a hardware-aware local model manager for Gemma 4
+E2B, Gemma 4 E4B, and Qwen 8B GGUF quantizations. The main process detects RAM,
+CPU architecture/threads, free disk space, and available GPU memory. It verifies
+requirements before downloads, reports progress through a context-isolated IPC
+bridge, persists the model directory and selected model under Electron's
+`userData`, and imports installed GGUF files into Ollama using a generated
+`Modelfile`.
+
+For the in-app chat, install and start Ollama. The app downloads the selected
+GGUF, imports it into Ollama with a generated model tag, and streams responses
+from Ollama's local `/api/chat` endpoint. The selected model must be installed
+in Ollama before the Local Chat button becomes available.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

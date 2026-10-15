@@ -1,110 +1,84 @@
-// import {app, BrowserWindow} from "electron" 
-// import path from 'path'
-// import { isDev } from "./utils.js";
+import { app, BrowserWindow } from 'electron';
+import { ipcMainHandle, ipcMainOn, isDev } from './utils.js';
+import { getStaticData, pollResources } from './resourceManager.js';
+import { getPreloadPath, getUIPath } from './pathResolver.js';
+import { createTray } from './tray.js';
+import { createMenu } from './menu.js';
+import {
+  setModelManagerWindow,
+  registerModelIpc,
+} from "./model-manager/model-manager.js";
+import { registerLlamaIpc } from './llama-runtime.js';
 
-// //get the electron app and spin a browser window when ready
-// app.on('ready', () => {
-//     const mainWindow = new BrowserWindow({});
-
-//     // is in dev mode run vite app on other terminal and load the 
-//     // url so we get hotreloading and we wont need to restart app to check changes 
-//     // -Omkar S
-//     if(isDev()) { 
-//         mainWindow.loadURL('http://localhost:5123')
-//     }
-//     else {
-//         mainWindow.loadFile(path.join(app.getAppPath() + '/dist-react/index.html'))
-//     }
-// })
-
-
-import { app, BrowserWindow } from "electron";
-import path from "path";
-import fs from "fs";
-import { spawn } from "child_process";
-import { writeFile } from "fs/promises";
-import { isDev } from "./utils.js";
-
-app.on("ready", async () => {
-    const mainWindow = new BrowserWindow({});
-
-    if (isDev()) {
-        mainWindow.loadURL("http://localhost:5123");
-    } else {
-        mainWindow.loadFile(
-            path.join(app.getAppPath(), "dist-react", "index.html")
-        );
+app.on('ready', () => {
+  const mainWindow = new BrowserWindow({
+    webPreferences: {
+      preload: getPreloadPath(),
+    },
+    // disables default system frame (dont do this if you want a proper working menu bar)
+    frame: false,
+  });
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F12') {
+      event.preventDefault();
+      if (mainWindow.webContents.isDevToolsOpened()) mainWindow.webContents.closeDevTools();
+      else mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
+  });
+  if (isDev()) {
+    mainWindow.loadURL('http://localhost:5123');
+  } else {
+    mainWindow.loadFile(getUIPath());
+  }
 
-    // Get Windows user information
-    const username = process.env.USERNAME;
-    const userProfile = process.env.USERPROFILE;
-    const localAppData = process.env.LOCALAPPDATA;
+  pollResources(mainWindow);
 
-    console.log("Username:", username);
-    console.log("User profile:", userProfile);
+  ipcMainHandle('getStaticData', () => {
+    return getStaticData();
+  });
 
-    // Project directory and file
-    const projectPath = "D:\\CPP";
-    const filePath = path.join(projectPath, "test_takeover.cpp");
-
-    // Hello World C++ code
-    const code = `#include <iostream>
-
-int main() {
-    std::cout << "Hello World!" << std::endl;
-    return 0;
-}
-`;
-
-    try {
-        // Create project directory if it doesn't exist
-        await fs.promises.mkdir(projectPath, { recursive: true });
-
-        // Write C++ code to file
-        await writeFile(filePath, code, "utf8");
-
-        console.log("Created file:", filePath);
-
-        // Locate VS Code
-        const candidates = [
-            path.join(
-                localAppData || "",
-                "Programs",
-                "Microsoft VS Code",
-                "Code.exe"
-            ),
-            "C:\\Program Files\\Microsoft VS Code\\Code.exe",
-            "C:\\Program Files (x86)\\Microsoft VS Code\\Code.exe"
-        ];
-
-        const vscodePath = candidates.find(candidate =>
-            fs.existsSync(candidate)
-        );
-
-        if (!vscodePath) {
-            console.error("VS Code executable not found.");
-            return;
-        }
-
-        // Open project and navigate to the generated file
-        const vscode = spawn(
-            vscodePath,
-            [projectPath, "-g", `${filePath}:1:1`],
-            {
-                detached: true,
-                stdio: "ignore",
-                shell: false
-            }
-        );
-
-        vscode.on("error", error => {
-            console.error("Failed to open VS Code:", error.message);
-        });
-
-        vscode.unref();
-
-    } catch (error) {
-        console.error("Operation failed:", error);
+  ipcMainOn('sendFrameAction', (payload) => {
+    switch (payload) {
+      case 'CLOSE':
+        mainWindow.close();
+        break;
+      case 'MAXIMIZE':
+        mainWindow.maximize();
+        break;
+      case 'MINIMIZE':
+        mainWindow.minimize();
+        break;
     }
+  });
+
+  setModelManagerWindow(mainWindow);
+  registerModelIpc();
+  registerLlamaIpc();
+
+  createTray(mainWindow);
+  handleCloseEvents(mainWindow);
+  createMenu(mainWindow);
 });
+
+function handleCloseEvents(mainWindow: BrowserWindow) {
+  let willClose = false;
+
+  mainWindow.on('close', (e) => {
+    if (willClose) {
+      return;
+    }
+    e.preventDefault();
+    mainWindow.hide();
+    if (app.dock) {
+      app.dock.hide();
+    }
+  });
+
+  app.on('before-quit', () => {
+    willClose = true;
+  });
+
+  mainWindow.on('show', () => {
+    willClose = false;
+  });
+}
